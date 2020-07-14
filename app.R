@@ -11,8 +11,6 @@ suppressMessages(library(lubridate))
 suppressMessages(library(scales))
 suppressMessages(library(DT))
 
-onStop(function() { poolClose(monitor_db) })
-
 ####################################################################################################
 
 ui <- fluidPage(tags$head(includeHTML("google-analytics.html")),
@@ -38,7 +36,7 @@ server <- function(input, output, session){
   ##################################
   #CONNECT TO DATABASE
   monitor_db <- dbPool(drv = "PostgreSQL", dbname = "", host = "", port = , user = "", password = "")
-
+  onStop(function() { poolClose(monitor_db) })
 
   ##################################
 
