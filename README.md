@@ -8,9 +8,7 @@ The Science Pulse is distributed under the MIT License.
 
 ### About 
 
-The **Science Pulse** is supported by the [International Center for Journalists](https://icfj.org/), under the [Knight Fellowship](https://www.icfj.org/our-work/knight/icfj-knight-fellowships) program. The project is developed by the data-driven agency [Volt Data Lab](https://voltdata.info/).
-
-Brazilian science journalism agency [Bori](https://abori.com.br/) is our partner in this venture, helping us to make sense of the technology and the information we gather.  
+The **Science Pulse** is developed by the data-driven agency [Volt Data Lab](https://voltdata.info/), with support from the [International Center for Journalists](https://icfj.org/). Brazilian science journalism agency [Bori](https://abori.com.br/) is our partner in this venture, helping us to make sense of the technology and the information we gather.  
 
 ### Tools
 
