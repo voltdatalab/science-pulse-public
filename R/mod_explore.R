@@ -1,9 +1,10 @@
-###################################################################################################
-###################################################################################################
-###################
-###################                    MODULE - EXPLORE TAB
+#########################################################################################
+#########################################################################################
+###################                                               #######################
+###################           MODULO - TWITTER - EXPLORE          #######################
+###################                                               #######################
 
-###################################################################################################
+#########################################################################################
 
 ### SERVER
 
@@ -13,249 +14,166 @@ mod_explore_server <- function(id, base) {
     id,
     function(input, output, session) {
 
+      ##################################################
+      ##### PREPARAR BASE
+
       trends_dataset <- reactive({
 
-      # Load data
-      sql_t <- "SELECT created_at,text,language,screen_name,hashtags,is_retweet,name,status_id,retweet_count from base
-      ORDER BY created_at DESC
-      LIMIT 20000"
-      query_t <- sqlInterpolate(base, sql_t)
-      trends <- as_tibble(dbGetQuery(base, query_t))
+        # Carregar dados da view explore
+        sql_t <- "SELECT * from v_mod_explore"
+        query_t <- sqlInterpolate(base, sql_t)
+        trends <- as_tibble(dbGetQuery(base, query_t))
 
-      trends <- trends %>%
-        filter(language == input$language)
+        # Filtro de idioma
+        trends <- trends %>%
+          filter(language == input$language)
 
-      # Create current time column
-      trends$current_time <- lubridate::now()
-      trends$created_at <- as.POSIXct(trends$created_at, format="%Y-%m-%d %H:%M:%S")
-      trends$created_at <- trends$created_at - hours(3)
+        # Atualiza o fuso-horario dos tweets
+        trends$created_at <- as.POSIXct(trends$created_at, format="%Y-%m-%d %H:%M:%S")
+        trends$created_at <- trends$created_at - hours(3)
 
-      #  Filter last 12h
-      trends_12h <- filter(trends, created_at > current_time - hours(12))
+        # Filtra pelas ultimas 12h
+        trends$current_time <- lubridate::now()
+        trends <- filter(trends, created_at > current_time - hours(12))
 
       })
 
       ##################################################
       ##### EXPLORE
 
-      ### MOST ACTIVE USERS
-
-      # Users in our sample that posted the highest number of tweets on the last 12h.
-
+      ##########
+      ### USUARIOS MAIS ATIVOS
       output$active_users <- renderTable({
 
         trends_dataset() %>%
-          #filter(language == input$language) %>%
-          group_by(language, screen_name) %>%
-          count(sort = T) %>%
-          ungroup() %>%
-          slice(1:5) %>%
-          select(language, screen_name) %>%
-          mutate(screen_name = paste0("@<a href='https://twitter.com/", screen_name, "' target='_blank' style='color: #d91c5c'>", screen_name, "</a>")) %>%
-          rename("Active users <i class='fas fa-users'></i>" = screen_name)
+          active_users()
 
-      },
+      }, sanitize.text.function = function(x) x, striped = TRUE, target="_blank")
 
-      sanitize.text.function = function(x) x, striped = FALSE, target="_blank")
-
-      ### MOST TWEETED HASHTAGS
-
+      ##########
+      ### HASHTAGS MAIS TUITADAS
       output$hashtags <- renderTable({
 
-        # Extract most shared hashtags from last 12h tweets
         hashtags <- trends_dataset() %>%
-          #filter(language == input$language) %>%
           .$hashtags
+
         lista_hashtags <- unlist(str_split(hashtags, ","))
-        lista_hashtags <- tibble(hashtag = str_trim(tolower(stri_trans_general(lista_hashtags, "Latin-ASCII")), "both"))
+        lista_hashtags <- tibble(hashtag = str_trim(stri_trans_general(lista_hashtags, "Latin-ASCII"), "both"))
+        lista_hashtags %>%
+          most_hashtags()
 
-        lista_hashtags <- lista_hashtags %>%
-          filter(hashtag != "na") %>%
-          mutate(hashtag = toupper(hashtag)) %>%
-          mutate(hashtag = paste0("#<a href='https://twitter.com/hashtag/", hashtag, "' target='_blank' style='color: #d91c5c'>", hashtag, "</a>")) %>%
-          count(hashtag, sort = T) %>%
-          slice(1:5) %>%
-          select(n, hashtag) %>%
-          rename("Hashtags <i class='fas fa-hashtag'></i>" = hashtag)
+      }, sanitize.text.function = function(x) x, striped = TRUE, target="_blank")
 
-      },
-
-      sanitize.text.function = function(x) x, striped = FALSE, target="_blank")
-
-      ### ALSO POPULAR WITHIN PULSE
-
-      # Among tweets in the sample (posted in the sample), which ones were more RT (by the whole universe of twitter users)?
-      # Count includes RTs by users outside Pulse. However, original tweets were posted only by members.
-
+      ##########
+      ### TAMBEM POPULARES NO PULSE
       output$own_sample <- renderTable({
 
-        set.seed(12345)
+        trends_dataset() %>%
+          also_popular()
 
-        own_sample_trends <- trends_dataset() %>%
-          filter(is_retweet == F) %>%
-          mutate(text = paste0('<blockquote class="twitter-tweet"><p lang="',
-                               language, '" dir="ltr">',
-                               text, '</p>&mdash;',
-                               name, '(@',
-                               screen_name, ') <a href="https://twitter.com/',
-                               screen_name, '/status/',
-                               status_id, '">',
-                               created_at, '</a></blockquote> <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>')) %>%
-          #mutate(text = paste0(" <em style='font-size:0.9em'><i class='far fa-clock'></i>", created_at, " </em><br><a href='https://twitter.com/", screen_name,"/status/",status_id,"' target='_blank'>@<strong style='color: #d91c5c'>", screen_name, "</strong></a>: ", text, "<a href='https://twitter.com/", screen_name,"/status/",status_id,"' target='_blank'> <i class='fas fa-link fa-xs'></i></a>")) %>%
-        #  filter(language == input$language) %>%
-          group_by(language) %>%
-          arrange(desc(as.numeric(retweet_count))) %>%
-          ungroup()
+      }, sanitize.text.function = function(x) x, striped = FALSE, target="_blank")
 
-        # use kmeans a first time to get the centers
-        centers <- kmeans(as.numeric(own_sample_trends$retweet_count), centers = 4, nstart = 1000)$centers
-        # order the centers
-        centers <- sort(centers)
-        # call kmeans again but this time passing the centers calculated in the previous step
-        own_sample_trends$cluster <- kmeans(as.numeric(own_sample_trends$retweet_count), centers = centers)$cluster
-
-        own_sample_trends %>%
-          filter(cluster == 2) %>%
-          slice(1:5) %>%
-          select(language, text) %>%
-          ungroup() %>%
-          mutate(text = paste0("<strong>", 1:n(), "º //</strong> ", text)) %>%
-          rename("Also popular within Pulse <i class='fas fa-angle-double-up'></i>" = text)
-
-      },
-
-      sanitize.text.function = function(x) x, striped = FALSE, target="_blank")
-
-      ### HIDDEN GEMS - ON YOUR RADAR?
-
+      ##########
+      ### RADAR PULSE
       output$hidden_gems <- renderTable({
 
-        set.seed(12345)
+        trends_dataset() %>%
+          pulse_radar()
 
-        own_sample_trends <- trends_dataset() %>%
-          filter(is_retweet == F) %>%
-          mutate(text = paste0('<blockquote class="twitter-tweet"><p lang="',
-                               language, '" dir="ltr">',
-                               text, '</p>&mdash;',
-                               name, '(@',
-                               screen_name, ') <a href="https://twitter.com/',
-                               screen_name, '/status/',
-                               status_id, '">',
-                               created_at, '</a></blockquote> <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>')) %>%
-          #mutate(text = paste0(" <em style='font-size:0.9em'><i class='far fa-clock'></i>", created_at, " </em><br><a href='https://twitter.com/", screen_name,"/status/",status_id,"' target='_blank'>@<strong style='color: #d91c5c'>", screen_name, "</strong></a>: ", text, "<a href='https://twitter.com/", screen_name,"/status/",status_id,"' target='_blank'> <i class='fas fa-link fa-xs'></i></a>")) %>%
-         # filter(language == input$language) %>%
-          group_by(language) %>%
-          arrange(desc(as.numeric(retweet_count))) %>%
-          ungroup()
+      }, sanitize.text.function = function(x) x, striped = FALSE, target="_blank")
 
-        # use kmeans a first time to get the centers
-        centers <- kmeans(as.numeric(own_sample_trends$retweet_count), centers = 4, nstart = 1000)$centers
-        # order the centers
-        centers <- sort(centers)
-        # call kmeans again but this time passing the centers calculated in the previous step
-        own_sample_trends$cluster <- kmeans(as.numeric(own_sample_trends$retweet_count), centers = centers)$cluster
+      ##########
+      ### POPULAR ENTRE CIENTISTAS
+      output$rts12h_overall <- renderTable({
 
-        own_sample_trends %>%
-          filter(cluster == 2) %>%
-          sample_n(5) %>%
-          select(language, text) %>%
-          ungroup() %>%
-          mutate(text = paste0("<strong>//</strong> ", text)) %>%
-          rename("Pulse radar <i class='fas fa-dot-circle'></i>" = text)
+        trends_dataset() %>%
+          popular_among_scientists()
 
-      },
+      }, sanitize.text.function = function(x) x, striped = FALSE, target="_blank")
 
-      sanitize.text.function = function(x) x, striped = FALSE, target="_blank")
-
-      }
+    }
 
   )
 
 }
 
-###################################################################################################
+#########################################################################################
 
 ### UI
 
-mod_explore_ui <- function(id){
+mod_explore_ui <- function(id, i18n){
 
   ns <- NS(id)
 
   tagList(
 
-    # Page title and description
+    ### TITULO E DESCRICAO DA PAGINA
     tags$div(class = "sheet_topper",
-             tags$div(class = "sheet_header", style = "",
-                      tags$h1("DIG DEEPER", style = "text-align:center"),
-                      tags$p("This section reveals further information from our datasets. See other trending tweets and some hidden content from profiles that don't necessarily have many followers or engagement in their posts. You can", tags$a("click here", href="https://sciencepulse.org/methodology", target="_blank") , "to read the methodology.", style = "font-family: 'Roboto Mono', monospace"),
-                      tags$br(),
-                      # Language input
-                      selectInput(inputId = ns("language"),
-                                  label = tags$div(tags$p(style="font-weight:300", icon("language", class = "icons"), "choose language")),
-                                  c("English" = "en",
-                                    "Español" = "es",
-                                    "Português" = "pt"))
-             )),
+             img(src = "header-pulse.svg", height = "", width = "100%"),
 
-    # Page layout
+             tags$div(class = "sheet_header", style = "font-family: 'Roboto Mono', monospace",
+                      tags$h1("EXPLORE MAIS", style = "text-align:center"),
+                      tags$p("Esta seção contém informações complementares às", tags$b("TENDÊNCIAS"),
+                             "a partir dos nossos conjuntos de dados. Encontre outros tweets relevantes e publicações escondidas de perfis que não necessariamente possuem muitos seguidores ou engajamento em seus posts. Você pode",
+                      tags$a("clicar aqui", href="https://sciencepulse.org/metodologia", target="_blank"),
+                      "para ler a metodologia.")),
+             selectInput(inputId = ns("language"),
+                         label = tags$div(icon("language", class = "icons"), 'Escolha o idioma dos tweets'),
+                         c("Português" = "pt",
+                           "Inglês" = "en",
+                           "Espanhol" = "es"))
+                      ),
+
+    ### PAGINA PRINCIPAL
     tags$div(class = "container-fluid", style = "text-align:center",
 
-    column(2,
+             ### TABELAS A ESQUERDA
+             column(2,
 
-           #tags$br(),
+                    tags$p("Perfis mais ativos e principais hashtags nas últimas 12 horas."),
+                    # Usuarios mais ativos
+                    include_spinner_thin_column(ns("active_users")),
+                    tags$br(),
+                    # Hashtags mais usadas
+                    include_spinner_thin_column(ns("hashtags"))
 
-           # Left-tables description
-           tags$p("Most active users and hashtags in the last 12h."),
+             ),
 
-           # Active users table
-           withSpinner(tableOutput(ns("active_users")),
-                       type = getOption("spinner.type", default = 1),
-                       color = getOption("spinner.color", default = "#d91c5c"),
-                       size = getOption("spinner.size", default = 1),
-                       color.background = getOption("spinner.color.background", default = "#d91c5c"),
-                       custom.css = FALSE, proxy.height = if (grepl("height:\\s*\\d", tableOutput(ns("rts12h_sample")))) NULL else "300px"),
-           tags$br(),
+             ### COLUNAS PRINCIPAIS
 
-           # Hashtags table
-           withSpinner(tableOutput(ns("hashtags")),
-                       type = getOption("spinner.type", default = 1),
-                       color = getOption("spinner.color", default = "#d91c5c"),
-                       size = getOption("spinner.size", default = 1),
-                       color.background = getOption("spinner.color.background", default = "#d91c5c"),
-                       custom.css = FALSE, proxy.height = if (grepl("height:\\s*\\d", tableOutput(ns("rts12h_sample")))) NULL else "300px")
+             column(1),
 
-           ),
+             column(3,
 
-    column(1),
+                    tags$div(tags$b("TAMBÉM POPULARES NO PULSE"), icon("angle-double-up")),
+                    tags$br(),
+                    tags$p("Tweets populares que não entraram nos trends. Essa coluna é uma ampliação da métrica de tweets mais populares."),
+                    include_spinner_large_column(ns("own_sample"))
 
-    # Also popular within pulse
-    column(4,
-           tags$p("Somewhat popular tweets in Science Pulse that did not make into the trends."),
-           withSpinner(tableOutput(ns("own_sample")),
-                       type = getOption("spinner.type", default = 6),
-                       color = getOption("spinner.color", default = "#d91c5c"),
-                       size = getOption("spinner.size", default = 1),
-                       color.background = getOption("spinner.color.background", default = "#d91c5c"),
-                       custom.css = FALSE, proxy.height = if (grepl("height:\\s*\\d", tableOutput(ns("own_sample")))) NULL else "300px")
-    ),
+                    ),
 
-    #column(1),
+             column(3,
 
-    # Hidden gems?
-    column(4,
-           tags$p("Random sample of other popular (but usually not trending) tweets."),
-           withSpinner(tableOutput(ns("hidden_gems")),
-                       type = getOption("spinner.type", default = 6),
-                       color = getOption("spinner.color", default = "#d91c5c"),
-                       size = getOption("spinner.size", default = 1),
-                       color.background = getOption("spinner.color.background", default = "#d91c5c"),
-                       custom.css = FALSE, proxy.height = if (grepl("height:\\s*\\d", tableOutput(ns("hidden_gems")))) NULL else "300px")
-           )
+                    tags$div(tags$b("RADAR PULSE"), icon("dot-circle")),
+                    tags$br(),
+                    tags$p("Amostra aleatória de tweets populares. Essa coluna serve para aumentar a descoberta de conteúdo que fica de fora dos trends."),
+                    include_spinner_large_column(ns("hidden_gems"))
 
-    # Close tags$div
+                    ),
+
+             column(3,
+
+                    tags$div(tags$b("POPULAR ENTRE CIENTISTAS"), icon("retweet")),
+                    tags$br(),
+                    tags$p("Tweets de assuntos populares. Essa métrica inclui RTs de perfis fora do Science Pulse e pode incluir tópicos além da ciência."),
+                    include_spinner_large_column(ns("rts12h_overall"))
+
+                    )
+
+             # Fecha tags$div
+             )
+
+    # Fecha tagList
     )
-
-  # Close tagList
-  )
 
 }
